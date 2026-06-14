@@ -1,0 +1,81 @@
+name: Auto Version Bump
+
+on:
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+
+jobs:
+  check-and-bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # ── Fetch latest versions ─────────────────────────────────────────────────
+      - name: Get latest tuxedo-drivers version
+        id: drivers
+        run: |
+          RAW=$(curl -fsSL \
+            "https://gitlab.com/api/v4/projects/tuxedocomputers%2Fdevelopment%2Fpackages%2Ftuxedo-drivers/repository/tags?order_by=version&sort=desc&per_page=10")
+          TAG=$(echo "$RAW" | jq -r '[.[] | select(.name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))] | .[0].name')
+          [ -z "$TAG" ] || [ "$TAG" = "null" ] && { echo "ERROR: could not fetch drivers tag"; exit 1; }
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      # ── Read current versions ─────────────────────────────────────────────────
+      - name: Get current versions
+        id: current
+        run: |
+          DRIVERS=$(grep 'TUXEDO_VERSION:' .github/workflows/build-fedora-repo.yml | grep -oP '(?<=")[^"]+')
+          echo "drivers=$DRIVERS" >> "$GITHUB_OUTPUT"
+
+      # ── Short-circuit if already up to date ──────────────────────────────────
+      - name: Check if bump needed
+        id: needs_bump
+        run: |
+          if [ "${{ steps.drivers.outputs.version }}" = "${{ steps.current.outputs.drivers }}" ]; then
+            echo "Already at ${{ steps.current.outputs.drivers }} – nothing to do."
+            echo "bump=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New version: ${{ steps.current.outputs.drivers }} → ${{ steps.drivers.outputs.version }}"
+            echo "bump=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── Patch files ───────────────────────────────────────────────────────────
+      - name: Bump versions
+        if: steps.needs_bump.outputs.bump == 'true'
+        env:
+          OLD: ${{ steps.current.outputs.drivers }}
+          NEW: ${{ steps.drivers.outputs.version }}
+        run: |
+          sed -i "s/TUXEDO_VERSION: \"${OLD}\"/TUXEDO_VERSION: \"${NEW}\"/" \
+            .github/workflows/build-fedora-repo.yml
+          sed -i "s/^Version:[[:space:]].*$/Version:        ${NEW}/" \
+            tuxedo-drivers-kmod.spec
+
+          grep "TUXEDO_VERSION: \"${NEW}\"" .github/workflows/build-fedora-repo.yml \
+            || { echo "ERROR: workflow version not updated"; exit 1; }
+          grep "^Version:.*${NEW}" tuxedo-drivers-kmod.spec \
+            || { echo "ERROR: spec version not updated"; exit 1; }
+
+      # ── Commit and push ───────────────────────────────────────────────────────
+      - name: Commit and push
+        if: steps.needs_bump.outputs.bump == 'true'
+        env:
+          OLD: ${{ steps.current.outputs.drivers }}
+          NEW: ${{ steps.drivers.outputs.version }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add \
+            .github/workflows/build-fedora-repo.yml \
+            tuxedo-drivers-kmod.spec
+
+          git commit -m "chore: bump tuxedo-drivers ${OLD} → ${NEW} [auto]"
+          git push
+
+          echo "✓ Pushed. Build workflow will trigger automatically."

@@ -1,0 +1,125 @@
+name: Fedora Tuxedo Kmod Repo Builder
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  TUXEDO_VERSION: "4.22.2"
+  TUXEDO_RS_VERSION: "0.2.5"
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    permissions:
+      contents: write
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # ── 2. Dependencies ──────────────────────────────────────────────────────
+      - name: Install Build Dependencies
+        run: |
+          dnf update -y
+
+          # Core RPM build tools
+          dnf install -y \
+            rpm-build rpmdevtools \
+            make gcc patch wget tar unzip git \
+            systemd-rpm-macros \
+            redhat-rpm-config \
+            perl \
+            elfutils-libelf-devel \
+            openssl-devel
+
+          # kmod / akmod tooling
+          dnf install -y \
+            akmods kmodtool \
+            kernel-devel
+
+          # tuxedo-rs build deps
+          dnf install -y \
+            cargo rust meson ninja-build \
+            desktop-file-utils \
+            gtk4-devel libadwaita-devel gettext \
+            createrepo_c
+
+      # ── 3. RPM tree ──────────────────────────────────────────────────────────
+      - name: Prepare RPM Build Environment
+        run: |
+          echo '%_topdir %(echo $HOME)/rpmbuild' > ~/.rpmmacros
+          mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+
+          cp tuxedo-drivers-kmod.spec ~/rpmbuild/SPECS/
+          cp tuxedo-rs.spec           ~/rpmbuild/SPECS/
+          cp fixed_color_button.rs    ~/rpmbuild/SOURCES/
+
+      # ── 4. Sources ───────────────────────────────────────────────────────────
+      - name: Download Upstream Sources
+        run: |
+          wget \
+            "https://gitlab.com/tuxedocomputers/development/packages/tuxedo-drivers/-/archive/v${TUXEDO_VERSION}/tuxedo-drivers-v${TUXEDO_VERSION}.tar.gz" \
+            -O ~/rpmbuild/SOURCES/tuxedo-drivers-v${TUXEDO_VERSION}.tar.gz
+
+          wget \
+            "https://github.com/AaronErhardt/tuxedo-rs/archive/refs/tags/tailord-v${TUXEDO_RS_VERSION}.tar.gz" \
+            -O ~/rpmbuild/SOURCES/tuxedo-rs-${TUXEDO_RS_VERSION}.tar.gz
+
+      # ── 5. Build ─────────────────────────────────────────────────────────────
+      - name: Build RPM Packages
+        run: |
+          rpmbuild -ba ~/rpmbuild/SPECS/tuxedo-drivers-kmod.spec
+          rpmbuild -ba ~/rpmbuild/SPECS/tuxedo-rs.spec
+
+      # ── 6. Stage & create repo ───────────────────────────────────────────────
+      - name: Organise Repo and Create Database
+        run: |
+          mkdir -p staging/x86_64 staging/noarch
+
+          cp ~/rpmbuild/RPMS/x86_64/*.rpm staging/x86_64/ 2>/dev/null || true
+          cp ~/rpmbuild/RPMS/noarch/*.rpm  staging/noarch/ 2>/dev/null || true
+
+          createrepo_c staging/
+
+          cat <<REPOEOF > staging/tuxedo-fedora.repo
+          [tuxedo-repo]
+          name=Tuxedo Hardware Repo (Atul977) - Fedora
+          enabled=1
+          metadata_expire=1d
+          baseurl=https://atul977.github.io/Fedora-Tuxedo-Repo/
+          type=rpm-md
+          gpgcheck=0
+          REPOEOF
+
+          cd staging
+          echo "<html><body style='background:#121212;color:#eee;font-family:sans-serif;padding:40px;'>" > index.html
+          echo "<h1>Fedora Tuxedo Repo (kmod build – compat check disabled)</h1><hr><ul>" >> index.html
+          echo "<li><a href='x86_64/' style='color:#00adb5;'>x86_64 Packages</a></li>" >> index.html
+          echo "<li><a href='noarch/' style='color:#00adb5;'>noarch Packages</a></li>" >> index.html
+          echo "<li><a href='tuxedo-fedora.repo' style='color:#00adb5;'>tuxedo-fedora.repo (dnf config)</a></li>" >> index.html
+          echo "</ul><hr><p>Updated: $(date)</p></body></html>" >> index.html
+
+          for dir in x86_64 noarch; do
+            echo "<html><body style='background:#121212;color:#eee;font-family:sans-serif;padding:40px;'>" > $dir/index.html
+            echo "<h1>$dir Packages</h1><hr><ul>" >> $dir/index.html
+            echo "<li><a href='../' style='color:#00adb5;'>../ (Parent Directory)</a></li>" >> $dir/index.html
+            for rpm in $dir/*.rpm; do
+              if [ -e "$rpm" ]; then
+                filename=$(basename "$rpm")
+                echo "<li><a href='$filename' style='color:#00adb5;'>$filename</a></li>" >> $dir/index.html
+              fi
+            done
+            echo "</ul><hr></body></html>" >> $dir/index.html
+          done
+
+      # ── 7. Deploy ─────────────────────────────────────────────────────────────
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./staging
+          publish_branch: gh-pages
