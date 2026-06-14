@@ -1,0 +1,7 @@
+[tuxedo-repo]
+name=Tuxedo Hardware Repo (Atul977) - Fedora
+enabled=1
+metadata_expire=1d
+baseurl=https://atul977.github.io/Fedora-Tuxedo-Repo/
+type=rpm-md
+gpgcheck=0
