@@ -32,7 +32,7 @@ Enables native hardware control on supported laptops:
 
 | Package | Description |
 | :--- | :--- |
-| `akmod-tuxedo-drivers-kmod` | 🔧 Kernel drivers. Compiles automatically for your running kernel on first boot. |
+| `akmod-tuxedo-drivers` | 🔧 Kernel drivers. Compiles automatically for your running kernel on first boot. |
 | `tuxedo-rs` | ⚙️ `tailord` hardware daemon + GTK4 `tailor_gui`. Patched with the Niri color picker fix. |
 
 ---
@@ -45,7 +45,7 @@ sudo curl -Lo /etc/yum.repos.d/tuxedo-fedora.repo \
   https://atul977.github.io/Fedora-Tuxedo-Repo/tuxedo-fedora.repo
 
 # 2. Install
-sudo dnf install akmod-tuxedo-drivers-kmod tuxedo-rs
+sudo dnf install akmod-tuxedo-drivers tuxedo-rs
 
 # 3. Reboot — akmod compiles the kernel modules automatically on first boot
 reboot
