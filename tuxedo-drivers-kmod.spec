@@ -3,7 +3,7 @@
 %global debug_package %{nil}
 
 Name:           tuxedo-drivers-kmod
-Version:        4.22.2
+Version:        4.22.3
 Release:        %autorelease
 Summary:        Drivers for Tuxedo computers (hardware compat check disabled)
 

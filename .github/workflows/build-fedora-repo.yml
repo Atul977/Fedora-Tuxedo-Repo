@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 env:
-  TUXEDO_VERSION: "4.22.2"
+  TUXEDO_VERSION: "4.22.3"
   TUXEDO_RS_VERSION: "0.2.5"
 
 jobs:
